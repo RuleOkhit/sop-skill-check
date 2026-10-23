@@ -130,19 +130,24 @@
     var iso = load(KEY.locks, {})[key];
     return iso && new Date(iso).getTime() > Date.now() ? iso : null;
   }
+  // One test per day applies to the employee across all tests.
+  function dailyKey(empId) { return normId(empId) + "|*"; }
 
   // Ask the sheet whether this employee may take this test now. Falls back to this device's record if offline.
   function checkEligibility() {
-    var key = lockKey(S.person.empId, S.testId, S.levelId);
+    var key = lockKey(S.person.empId, S.testId, S.levelId), dKey = dailyKey(S.person.empId);
     return apiGet({ action: "check", empId: normId(S.person.empId), test: S.testId, level: S.levelId })
       .then(function (res) {
         if (!res || !res.ok) throw new Error("Bad response");
-        setLocalLock(key, res.locked ? res.retakeFrom : null);
-        return { locked: !!res.locked, retakeFrom: res.retakeFrom, recent: res.recentQuestionIds || [] };
+        setLocalLock(key, res.locked && res.reason === "failed" ? res.retakeFrom : null);
+        setLocalLock(dKey, res.locked && res.reason === "daily" ? res.retakeFrom : null);
+        return { locked: !!res.locked, reason: res.reason, retakeFrom: res.retakeFrom, recent: res.recentQuestionIds || [] };
       })
       .catch(function () {
-        var iso = localLock(key);
-        return { locked: !!iso, retakeFrom: iso, recent: [] };
+        var failed = localLock(key), daily = localLock(dKey);
+        if (failed && (!daily || failed >= daily)) return { locked: true, reason: "failed", retakeFrom: failed, recent: [] };
+        if (daily) return { locked: true, reason: "daily", retakeFrom: daily, recent: [] };
+        return { locked: false, recent: [] };
       });
   }
 
@@ -210,15 +215,18 @@
     var finishedAt = Date.now();
     var key = lockKey(S.person.empId, S.testId, S.levelId);
     var retakeFrom = pass ? null : new Date(finishedAt + C.retakeDays * DAY_MS).toISOString();
+    var nextTestFrom = new Date(finishedAt + C.dailyGapHours * 60 * 60 * 1000).toISOString();
 
     S.result = {
       score: score, total: total, pass: pass,
       percent: Math.round((score / total) * 100),
       timeSec: Math.round((finishedAt - A.startedAt) / 1000),
       retakeFrom: retakeFrom,
+      nextTestFrom: nextTestFrom,
       saveState: "saving"
     };
     setLocalLock(key, retakeFrom);
+    setLocalLock(dailyKey(S.person.empId), nextTestFrom);
 
     var recent = load(KEY.recent, {});
     recent[key] = A.qs.map(function (q) { return q.id; }).concat(recent[key] || []).slice(0, 30);
@@ -258,6 +266,10 @@
     apiPost(payload).then(function (res) {
       if (S.result && S.attempt && S.attempt.id === payload.attemptId) {
         S.result.saveState = "saved";
+        if (res.nextTestFrom) {
+          S.result.nextTestFrom = res.nextTestFrom;
+          setLocalLock(dailyKey(payload.person.empId), res.nextTestFrom);
+        }
         if (!S.result.pass && res.retakeFrom) {
           S.result.retakeFrom = res.retakeFrom;
           setLocalLock(lockKey(payload.person.empId, payload.testId, payload.levelId), res.retakeFrom);
@@ -401,7 +413,7 @@
     var rules = [
       t("rule1", { n: n }), t("rule2"), t("rule3"),
       t("rule4", { p: C.passPercent, m: passMark(n), n: n }),
-      t("rule5", { p: C.passPercent, d: C.retakeDays }), t("rule6")
+      t("rule5", { p: C.passPercent, d: C.retakeDays }), t("rule7"), t("rule6")
     ];
     return pageHead(t("readyTitle"), t("readyDesc"), "4 / 4") +
       '<section class="card rise" style="--i:1">' +
@@ -431,8 +443,8 @@
         if (r.locked) {
           document.getElementById("lock-area").innerHTML =
             '<div class="alert alert-danger" role="alert">' + icon("lock") +
-            '<div><p class="alert-title">' + esc(t("lockedTitle")) + "</p>" +
-            '<p class="alert-desc">' + esc(t("lockedDesc", { date: fmtDate(r.retakeFrom) })) + " " +
+            '<div><p class="alert-title">' + esc(t(r.reason === "daily" ? "dailyTitle" : "lockedTitle")) + "</p>" +
+            '<p class="alert-desc">' + esc(t(r.reason === "daily" ? "dailyDesc" : "lockedDesc", { date: fmtDate(r.retakeFrom) })) + " " +
             esc(t("lockedSame", { id: normId(S.person.empId) })) + "</p></div></div>";
           btn.innerHTML = esc(t("start")) + icon("chevronRight");
           btn.disabled = true;
@@ -506,7 +518,7 @@
         ? '<span class="badge badge-success">' + icon("check") + esc(t("passed")) + "</span>"
         : '<span class="badge badge-danger">' + icon("x") + esc(t("failed")) + "</span>") +
       "</div>" +
-      '<p class="result-msg">' + esc(R.pass ? t("passMsg") : t("failMsg", { p: C.passPercent, date: fmtDate(R.retakeFrom) })) + "</p>" +
+      '<p class="result-msg">' + esc(R.pass ? t("passMsg", { date: fmtDate(R.nextTestFrom) }) : t("failMsg", { p: C.passPercent, date: fmtDate(R.retakeFrom) })) + "</p>" +
       '<p class="result-meta">' + esc(clean(S.person.name)) + " · " + esc(normId(S.person.empId)) + " · " +
       esc(findTest(S.testId).name[S.lang]) + " · " + esc(findLevel(S.levelId).name[S.lang]) + "</p>" +
       '<div aria-live="polite">' + status + "</div>" +

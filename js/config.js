@@ -3,11 +3,12 @@
   backendUrl: the Google Apps Script web app URL (ends with /exec). See README.md.
 */
 window.APP_CONFIG = {
-  backendUrl: "",
+  backendUrl: "https://script.google.com/macros/s/AKfycbzHh6_ikAfPQYQ1q_QIVrzMMJHE8H7tatQCGnfTvmYbIO1oNiNxApE_PsEyRH1N5Em9/exec",
 
   questionsPerTest: 15,
   passPercent: 60,     // below this = fail
-  retakeDays: 3,       // wait time after a fail (also set in backend/Code.gs)
+  retakeDays: 3,       // wait after a fail, same test and level (also set in backend/Code.gs)
+  dailyGapHours: 24,   // one test per day per employee ID (also set in backend/Code.gs)
 
   // Fixed list keeps the department-wise summary clean in Google Sheets.
   departments: [

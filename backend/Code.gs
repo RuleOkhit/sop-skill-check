@@ -7,10 +7,15 @@
  *
  * GET  ?action=check&empId=..&test=..&level=..  → may this person take the test now?
  * POST {action:"submit", ...}                    → save one finished attempt
+ *
+ * Rules, checked by employee ID so they work on any phone:
+ *   - One test per day: after any test, the next test (any test, any level) opens 1 day later.
+ *   - Fail: the same test and level opens 3 days later.
  */
 
 var PASS_PERCENT = 60;  // keep the same as js/config.js
-var RETAKE_DAYS = 3;
+var RETAKE_DAYS = 3;     // wait after a fail, same test and level
+var GAP_HOURS = 24;      // wait after any test, before the next one
 var RECENT_KEEP = 30;   // question IDs remembered per person, so the next test gets new questions
 
 var TEST_NAMES = { "gas-generator": "Gas Generator", "chiller": "Chiller" };
@@ -65,19 +70,36 @@ function doPost(e) {
 function checkEligibility_(empId, testId, levelId) {
   empId = normId_(empId);
   if (!empId || !testId || !levelId) throw new Error("Missing employee ID, test or level");
-  var row = findStatusRow_(statusKey_(empId, testId, levelId));
-  if (!row) return { ok: true, locked: false, recentQuestionIds: [] };
-
-  var v = row.values;
-  var retake = v[ST.retake - 1] instanceof Date ? v[ST.retake - 1] : null;
-  var locked = v[ST.result - 1] === "Fail" && retake && retake.getTime() > Date.now();
+  var lock = activeLock_(empId, statusKey_(empId, testId, levelId), Date.now());
   return {
     ok: true,
-    locked: !!locked,
-    retakeFrom: locked ? retake.toISOString() : null,
-    lastResult: v[ST.result - 1] || null,
-    recentQuestionIds: String(v[ST.recent - 1] || "").split(",").map(trim_).filter(String)
+    locked: !!lock.until,
+    reason: lock.reason,                       // "daily" or "failed"
+    retakeFrom: lock.until ? new Date(lock.until).toISOString() : null,
+    lastResult: lock.lastResult,
+    recentQuestionIds: lock.recent
   };
+}
+
+// Looks at every test this employee has taken and returns the latest date that still blocks them.
+function activeLock_(empId, key, now) {
+  var out = { until: null, reason: null, lastResult: null, recent: [] };
+  findEmployeeRows_(empId).forEach(function (r) {
+    var v = r.values, lastAt = v[ST.lastAt - 1], retake = v[ST.retake - 1];
+    if (lastAt instanceof Date) {
+      var t = lastAt.getTime() + GAP_HOURS * 60 * 60 * 1000;
+      if (t > now && (!out.until || t > out.until)) { out.until = t; out.reason = "daily"; }
+    }
+    if (v[ST.key - 1] === key) {
+      out.lastResult = v[ST.result - 1] || null;
+      out.recent = String(v[ST.recent - 1] || "").split(",").map(trim_).filter(String);
+      if (v[ST.result - 1] === "Fail" && retake instanceof Date && retake.getTime() > now &&
+          (!out.until || retake.getTime() >= out.until)) {
+        out.until = retake.getTime(); out.reason = "failed";
+      }
+    }
+  });
+  return out;
 }
 
 /* ---------------- Submit ---------------- */
@@ -114,25 +136,28 @@ function submitAttempt_(d) {
     var secs = Math.max(0, Math.round(Number(d.timeTakenSec) || 0));
     var key = statusKey_(empId, testId, levelId);
 
-    // Flag attempts taken while a retake lock was active (for example from a device that was offline).
+    // Flag attempts taken while a lock was active (for example from a phone that was offline).
     var note = "";
-    var prev = findStatusRow_(key);
-    if (prev) {
-      var pv = prev.values, pr = pv[ST.retake - 1];
-      if (pv[ST.result - 1] === "Fail" && pr instanceof Date && pr.getTime() > now.getTime()) {
-        note = "Taken before retake date (" + fmt_(ss, pr) + ")";
-      }
+    var active = activeLock_(empId, key, now.getTime());
+    if (active.until) {
+      note = (active.reason === "failed" ? "Taken before retake date (" : "Taken within 1 day of last test (") +
+        fmt_(ss, new Date(active.until)) + ")";
     }
+    var prev = findStatusRow_(key);
 
     var qIds = answers.map(function (a) { return safe_(a.id); });
     var wrongIds = answers.filter(function (a) { return !a.ok; }).map(function (a) { return safe_(a.id); });
 
-    results.appendRow([
+    var resRow = results.getLastRow() + 1;
+    ensureRows_(results, resRow);
+    results.getRange(resRow, 1, 1, TABS.results.headers.length).setValues([[
       now, attemptId, "'" + empId, safe_(person.name), safe_(person.designation), safe_(person.department),
       titleCase_(safe_(person.agency)), testName, levelName, safe_(d.language), score, total, pct,
-      pass ? "Pass" : "Fail", pass ? 1 : 0, Math.round(secs / 6) / 10, clock_(secs),
+      pass ? "Pass" : "Fail", pass ? 1 : 0, Math.round(secs / 6) / 10, "'" + clock_(secs),
       retakeFrom || "", note, qIds.join(", "), wrongIds.join(", ")
-    ]);
+    ]]);
+    results.getRange(resRow, 1).setNumberFormat("dd mmm yyyy, hh:mm");
+    results.getRange(resRow, 18).setNumberFormat("dd mmm yyyy, hh:mm");
 
     if (answers.length) {
       var ans = ensureTab_(ss, TABS.answers);
@@ -143,6 +168,7 @@ function submitAttempt_(d) {
       var start = ans.getLastRow() + 1;
       ensureRows_(ans, start + rows.length - 1);
       ans.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+      ans.getRange(start, 1, rows.length, 1).setNumberFormat("dd mmm yyyy, hh:mm");
     }
 
     upsertStatus_(ss, key, prev, {
@@ -150,7 +176,11 @@ function submitAttempt_(d) {
       pct: pct, pass: pass, now: now, retakeFrom: retakeFrom, qIds: qIds
     });
 
-    return { ok: true, pass: pass, percent: Math.round(pct * 100), retakeFrom: retakeFrom ? retakeFrom.toISOString() : null };
+    return {
+      ok: true, pass: pass, percent: Math.round(pct * 100),
+      retakeFrom: retakeFrom ? retakeFrom.toISOString() : null,
+      nextTestFrom: new Date(now.getTime() + GAP_HOURS * 60 * 60 * 1000).toISOString()
+    };
   } finally {
     lock.releaseLock();
   }
@@ -174,6 +204,7 @@ function upsertStatus_(ss, key, prev, x) {
   var r = prev ? prev.row : sh.getLastRow() + 1;
   ensureRows_(sh, r);
   sh.getRange(r, 1, 1, row.length).setValues([row]);
+  sh.getRange(r, ST.lastAt, 1, 2).setNumberFormat("dd mmm yyyy, hh:mm");
   // Live status: changes from "Locked" to "Can retake now" on its own when the date passes.
   sh.getRange(r, ST.status).setFormulaR1C1(
     '=IF(R[0]C[-3]="Pass","Passed",IF(R[0]C[-1]="","",IF(NOW()>=R[0]C[-1],"Can retake now","Locked until retake date")))');
@@ -187,6 +218,16 @@ function findStatusRow_(key) {
   var cell = sh.getRange(2, ST.key, sh.getLastRow() - 1, 1).createTextFinder(key).matchEntireCell(true).findNext();
   if (!cell) return null;
   return { row: cell.getRow(), values: sh.getRange(cell.getRow(), 1, 1, TABS.status.headers.length).getValues()[0] };
+}
+
+function findEmployeeRows_(empId) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.status.name);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var pattern = "^" + empId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\|";
+  return sh.getRange(2, ST.key, sh.getLastRow() - 1, 1).createTextFinder(pattern).useRegularExpression(true).findAll()
+    .map(function (cell) {
+      return { row: cell.getRow(), values: sh.getRange(cell.getRow(), 1, 1, TABS.status.headers.length).getValues()[0] };
+    });
 }
 
 function ensureTab_(ss, def) {
@@ -236,14 +277,18 @@ function json_(obj) {
 /* ---------------- Admin helper ---------------- */
 
 /**
- * Lets one person retake a test now, without waiting.
- * Run from the Apps Script editor: change the three values, then press Run.
+ * Lets one person take a test now, without waiting (clears both the 1-day and the 3-day wait).
+ * Run from the Apps Script editor: change the employee ID, then press Run.
  */
 function unlockRetake() {
-  var empId = "FP1023", testId = "gas-generator", levelId = "operator";
-  var hit = findStatusRow_(statusKey_(empId, testId, levelId));
-  if (!hit) { Logger.log("No record for " + empId); return; }
+  var empId = normId_("FP1023");
+  var rows = findEmployeeRows_(empId);
+  if (!rows.length) { Logger.log("No record for " + empId); return; }
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TABS.status.name);
-  sh.getRange(hit.row, ST.retake).setValue(new Date());
-  Logger.log("Unlocked " + empId + " for " + testId + " / " + levelId);
+  var past = new Date(Date.now() - GAP_HOURS * 60 * 60 * 1000 - 60 * 1000);
+  rows.forEach(function (r) {
+    sh.getRange(r.row, ST.lastAt).setValue(past);
+    if (r.values[ST.retake - 1] instanceof Date) sh.getRange(r.row, ST.retake).setValue(past);
+  });
+  Logger.log("Unlocked " + empId + " (" + rows.length + " test records)");
 }

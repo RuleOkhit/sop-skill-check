@@ -14,7 +14,10 @@ A short multiple choice test on our Standard Operating Procedures (SOPs), in Eng
 3. 15 questions, 4 options each, one at a time. A clock in the top corner shows the time taken (no time limit).
 4. English / हिंदी button at the top works at any time, even in the middle of the test.
 5. At the end they see their score and only the questions they got wrong, with the correct answer.
-6. Pass mark is 60% (9 of 15). Below that, the same employee ID cannot take the same test and level again for 3 days.
+6. Pass mark is 60% (9 of 15).
+7. Waiting rules, checked against the Google Sheet by employee ID (so changing phones does not help):
+   - **One test per day:** after any test, that employee ID can take its next test (any test, any level) 1 day later.
+   - **Fail:** the same test and level can be taken again only after 3 days.
 
 Each test picks 15 questions from a bank of 62 per level. Questions the person saw in their last attempts are skipped first, and the 15 are spread across topics (safety, pre-start, start, shutdown, trips, checks, records and so on). Answer options are shuffled every time.
 
@@ -47,9 +50,9 @@ After you change `Code.gs` later, use **Deploy → Manage deployments → Edit (
 
 ## Common jobs
 
-**Let someone retake before 3 days:** in Apps Script, open `unlockRetake`, change the employee ID, test and level at the top, and press **Run**.
+**Let someone take a test early:** in Apps Script, open `unlockRetake`, change the employee ID at the top, choose `unlockRetake` in the function menu and press **Run**. This clears both the 1-day and the 3-day wait for that person.
 
-**Change pass mark, number of questions or wait days:** edit `js/config.js`. If you change the pass mark or wait days, change them in `backend/Code.gs` too and redeploy.
+**Change pass mark, number of questions or wait times:** edit `js/config.js` (`passPercent`, `retakeDays`, `dailyGapHours`). If you change any of those three, change `PASS_PERCENT`, `RETAKE_DAYS` or `GAP_HOURS` in `backend/Code.gs` too and redeploy (Manage deployments → Edit → New version).
 
 **Change the department list:** edit `departments` in `js/config.js`.
 
