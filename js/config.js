@@ -8,7 +8,7 @@ window.APP_CONFIG = {
   questionsPerTest: 15,
   passPercent: 60,     // below this = fail
   retakeDays: 3,       // wait after a fail, same test and level (also set in backend/Code.gs)
-  dailyGapHours: 24,   // one test per day per employee ID (also set in backend/Code.gs)
+  dailyGapHours: 0,    // 0 = off. 24 = one test per day per employee ID (also set GAP_HOURS in backend/Code.gs)
 
   // Fixed list keeps the department-wise summary clean in Google Sheets.
   departments: [

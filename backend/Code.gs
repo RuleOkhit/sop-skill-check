@@ -15,7 +15,7 @@
 
 var PASS_PERCENT = 60;  // keep the same as js/config.js
 var RETAKE_DAYS = 3;     // wait after a fail, same test and level
-var GAP_HOURS = 24;      // wait after any test, before the next one
+var GAP_HOURS = 0;       // wait after any test before the next one (0 = off, 24 = one test per day)
 var RECENT_KEEP = 30;   // question IDs remembered per person, so the next test gets new questions
 
 var TEST_NAMES = { "gas-generator": "Gas Generator", "chiller": "Chiller" };
@@ -86,7 +86,7 @@ function activeLock_(empId, key, now) {
   var out = { until: null, reason: null, lastResult: null, recent: [] };
   findEmployeeRows_(empId).forEach(function (r) {
     var v = r.values, lastAt = v[ST.lastAt - 1], retake = v[ST.retake - 1];
-    if (lastAt instanceof Date) {
+    if (GAP_HOURS > 0 && lastAt instanceof Date) {
       var t = lastAt.getTime() + GAP_HOURS * 60 * 60 * 1000;
       if (t > now && (!out.until || t > out.until)) { out.until = t; out.reason = "daily"; }
     }
@@ -179,7 +179,7 @@ function submitAttempt_(d) {
     return {
       ok: true, pass: pass, percent: Math.round(pct * 100),
       retakeFrom: retakeFrom ? retakeFrom.toISOString() : null,
-      nextTestFrom: new Date(now.getTime() + GAP_HOURS * 60 * 60 * 1000).toISOString()
+      nextTestFrom: GAP_HOURS > 0 ? new Date(now.getTime() + GAP_HOURS * 60 * 60 * 1000).toISOString() : null
     };
   } finally {
     lock.releaseLock();

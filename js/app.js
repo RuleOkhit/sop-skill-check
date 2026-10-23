@@ -235,7 +235,7 @@
     var finishedAt = Date.now();
     var key = lockKey(S.person.empId, S.testId, S.levelId);
     var retakeFrom = pass ? null : new Date(finishedAt + C.retakeDays * DAY_MS).toISOString();
-    var nextTestFrom = new Date(finishedAt + C.dailyGapHours * 60 * 60 * 1000).toISOString();
+    var nextTestFrom = C.dailyGapHours > 0 ? new Date(finishedAt + C.dailyGapHours * 60 * 60 * 1000).toISOString() : null;
 
     S.result = {
       score: score, total: total, pass: pass,
@@ -246,7 +246,7 @@
       saveState: "saving"
     };
     setLocalLock(key, retakeFrom);
-    setLocalLock(dailyKey(S.person.empId), nextTestFrom);
+    if (nextTestFrom) setLocalLock(dailyKey(S.person.empId), nextTestFrom);
 
     var recent = load(KEY.recent, {});
     recent[key] = A.qs.map(function (q) { return q.id; }).concat(recent[key] || []).slice(0, 30);
@@ -286,7 +286,7 @@
     apiPost(payload).then(function (res) {
       if (S.result && S.attempt && S.attempt.id === payload.attemptId) {
         S.result.saveState = "saved";
-        if (res.nextTestFrom) {
+        if (res.nextTestFrom && C.dailyGapHours > 0) {
           S.result.nextTestFrom = res.nextTestFrom;
           setLocalLock(dailyKey(payload.person.empId), res.nextTestFrom);
         }
@@ -433,8 +433,8 @@
     var rules = [
       t("rule1", { n: n }), t("rule2"), t("rule3"),
       t("rule4", { p: C.passPercent, m: passMark(n), n: n }),
-      t("rule5", { p: C.passPercent, d: C.retakeDays }), t("rule7"), t("rule6")
-    ];
+      t("rule5", { p: C.passPercent, d: C.retakeDays })
+    ].concat(C.dailyGapHours > 0 ? [t("rule7")] : [], [t("rule6")]);
     return pageHead(t("readyTitle"), t("readyDesc"), "4 / 4") +
       '<section class="card rise" style="--i:1">' +
       '<dl class="summary">' +
@@ -538,7 +538,7 @@
         ? '<span class="badge badge-success">' + icon("check") + esc(t("passed")) + "</span>"
         : '<span class="badge badge-danger">' + icon("x") + esc(t("failed")) + "</span>") +
       "</div>" +
-      '<p class="result-msg">' + esc(R.pass ? t("passMsg", { date: fmtDate(R.nextTestFrom) }) : t("failMsg", { p: C.passPercent, date: fmtDate(R.retakeFrom) })) + "</p>" +
+      '<p class="result-msg">' + esc(R.pass ? (R.nextTestFrom ? t("passMsg", { date: fmtDate(R.nextTestFrom) }) : t("passMsgPlain")) : t("failMsg", { p: C.passPercent, date: fmtDate(R.retakeFrom) })) + "</p>" +
       '<p class="result-meta">' + esc(clean(S.person.name)) + " · " + esc(normId(S.person.empId)) + " · " +
       esc(findTest(S.testId).name[S.lang]) + " · " + esc(findLevel(S.levelId).name[S.lang]) + "</p>" +
       '<div aria-live="polite">' + status + "</div>" +

@@ -15,9 +15,7 @@ A short multiple choice test on our Standard Operating Procedures (SOPs), in Eng
 4. English / हिंदी button at the top works at any time, even in the middle of the test.
 5. At the end they see their score and only the questions they got wrong, with the correct answer.
 6. Pass mark is 60% (9 of 15).
-7. Waiting rules, checked against the Google Sheet by employee ID (so changing phones does not help):
-   - **One test per day:** after any test, that employee ID can take its next test (any test, any level) 1 day later.
-   - **Fail:** the same test and level can be taken again only after 3 days.
+7. If someone scores below 60%, the same employee ID can take that test and level again only after 3 days. This is checked against the Google Sheet, so changing phones does not help. (A one-test-per-day rule is built in but switched off: set `dailyGapHours` in `js/config.js` and `GAP_HOURS` in `backend/Code.gs` to 24 and redeploy to use it.)
 
 Each test picks 15 questions from a bank of 62 per level. Questions the person saw in their last attempts are skipped first, and the 15 are spread across topics (safety, pre-start, start, shutdown, trips, checks, records and so on). Answer options are shuffled every time.
 
