@@ -99,6 +99,7 @@ h1:focus-visible { outline: none; }
 /* ---------- Segmented control (language) ---------- */
 .seg { position: relative; display: inline-flex; max-width: 100%; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-muted); isolation: isolate; }
 .seg::before { content: ""; position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 0; width: var(--w, 0); transform: translateX(var(--x, 0)); border: 1px solid var(--border); border-radius: calc(var(--radius-control) - 4px); background: var(--surface); box-shadow: var(--shadow-resting); transition: transform var(--duration-spring) var(--ease-spring), width var(--duration-spring) var(--ease-spring); }
+.seg:not([data-ready])::before { transition: none; }
 .seg button { flex: none; min-height: var(--control-height-sm); min-width: 44px; padding: 0 12px; border: 0; border-radius: calc(var(--radius-control) - 4px); background: transparent; color: var(--text-muted); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer; transition: color var(--duration-fast) var(--ease-standard); }
 .seg button[aria-pressed="true"] { color: var(--foreground); }
 @media (hover: hover) and (pointer: fine) { .seg button:hover { color: var(--foreground); } }

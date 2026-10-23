@@ -549,6 +549,8 @@
     if (!active) return;
     seg.style.setProperty("--x", active.offsetLeft + "px");
     seg.style.setProperty("--w", active.offsetWidth + "px");
+    // First placement is instant; later changes glide.
+    if (!seg.hasAttribute("data-ready")) requestAnimationFrame(function () { seg.setAttribute("data-ready", ""); });
   }
   function syncLangControls() {
     document.querySelectorAll("[data-lang]").forEach(function (b) {
@@ -581,6 +583,7 @@
     if (S.screen === "quiz") { e.preventDefault(); e.returnValue = t("leaveWarn"); return t("leaveWarn"); }
   });
   window.addEventListener("resize", function () { document.querySelectorAll(".seg").forEach(placeSeg); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { document.querySelectorAll(".seg").forEach(placeSeg); });
 
   /* ---------- Render ---------- */
   var SCREENS = {
