@@ -164,6 +164,7 @@ function upsertStatus_(ss, key, prev, x) {
     attempts = (Number(v[ST.attempts - 1]) || 0) + 1;
     best = Math.max(Number(v[ST.best - 1]) || 0, x.pct);
     recent = x.qIds.concat(String(v[ST.recent - 1] || "").split(",").map(trim_).filter(String));
+    recent = recent.filter(function (id, i) { return recent.indexOf(id) === i; });
   }
   var row = [
     "'" + x.empId, safe_(x.person.name), safe_(x.person.designation), safe_(x.person.department),

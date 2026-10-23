@@ -152,7 +152,8 @@ h1:focus-visible { outline: none; }
 .select-wrap { position: relative; }
 .select-wrap::after { content: ""; position: absolute; right: 18px; top: 50%; width: 8px; height: 8px; border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: translateY(-70%) rotate(45deg); pointer-events: none; }
 select.input { appearance: none; -webkit-appearance: none; padding-right: var(--space-10); cursor: pointer; }
-select.input:invalid, select.input option[value=""] { color: var(--text-muted); }
+select.input:has(option[value=""]:checked) { color: var(--text-muted); }
+select.input option { color: var(--foreground); }
 
 /* ---------- Choice cards (test and level) ---------- */
 .choices { display: grid; gap: var(--space-3); }
