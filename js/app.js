@@ -105,20 +105,31 @@
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, ms) : null;
     return { signal: ctrl ? ctrl.signal : undefined, done: function () { if (timer) clearTimeout(timer); } };
   }
+  // Apps Script is sometimes slow to wake up or answers once with an error page, so every call gets a second try.
+  function twice(fn) {
+    return fn().catch(function () {
+      return new Promise(function (ok) { setTimeout(ok, 1500); }).then(fn);
+    });
+  }
   function apiGet(params) {
     if (!C.backendUrl) return Promise.reject(new Error("No backend URL"));
     var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); }).join("&");
-    var to = withTimeout(10000);
-    return fetch(C.backendUrl + "?" + qs, { method: "GET", signal: to.signal })
-      .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+    return twice(function () {
+      var to = withTimeout(15000);
+      return fetch(C.backendUrl + "?" + qs, { method: "GET", signal: to.signal })
+        .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+    });
   }
   function apiPost(body) {
     if (!C.backendUrl) return Promise.reject(new Error("No backend URL"));
-    var to = withTimeout(20000);
     // text/plain avoids a CORS preflight, which Apps Script does not answer.
-    return fetch(C.backendUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body), signal: to.signal })
-      .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (res) { if (!res || !res.ok) throw new Error((res && res.error) || "Save failed"); return res; });
+    // Sending twice is safe: the backend saves each attempt ID only once.
+    return twice(function () {
+      var to = withTimeout(30000);
+      return fetch(C.backendUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body), signal: to.signal })
+        .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (res) { if (!res || !res.ok) throw new Error((res && res.error) || "Save failed"); return res; });
+    });
   }
 
   function setLocalLock(key, iso) {
@@ -151,16 +162,24 @@
       });
   }
 
+  var flushing = false;
   function flushOutbox() {
     var box = load(KEY.outbox, []);
-    if (!box.length || !C.backendUrl) return Promise.resolve();
+    if (flushing || !box.length || !C.backendUrl) return Promise.resolve();
+    flushing = true;
     return box.reduce(function (p, item) {
       return p.then(function () {
         return apiPost(item).then(function () {
           store(KEY.outbox, load(KEY.outbox, []).filter(function (x) { return x.attemptId !== item.attemptId; }));
+          // The result on screen was waiting for this one.
+          if (S.result && S.attempt && S.attempt.id === item.attemptId && S.result.saveState !== "saved") {
+            S.result.saveState = "saved";
+            persist();
+            if (S.screen === "result") render(false);
+          }
         }).catch(function () { /* keep for next time */ });
       });
-    }, Promise.resolve());
+    }, Promise.resolve()).then(function () { flushing = false; });
   }
 
   /* ---------- Question picking ---------- */
@@ -645,8 +664,9 @@
     document.body.appendChild(note);
     setTimeout(function () { note.remove(); }, 4000);
   }
-  // Results stuck on this device from an earlier offline attempt.
+  // Results stuck on this device from an earlier offline attempt; keep trying while the page is open.
   flushOutbox();
+  setInterval(flushOutbox, 20000);
   // The result screen was reloaded before the save finished.
   if (S.screen === "result" && S.result && S.result.saveState === "saving" && S.result.payload) {
     sendResult(S.result.payload);
