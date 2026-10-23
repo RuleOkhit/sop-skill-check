@@ -100,10 +100,13 @@
   }
 
   /* ---------- Backend ---------- */
-  function withTimeout(ms) {
-    var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, ms) : null;
-    return { signal: ctrl ? ctrl.signal : undefined, done: function () { if (timer) clearTimeout(timer); } };
+  // Stop waiting after ms. No AbortSignal on purpose: with one attached, some browsers never finish
+  // the POST once Apps Script redirects to googleusercontent.com.
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () { reject(new Error("Timed out")); }, ms);
+      promise.then(function (v) { clearTimeout(timer); resolve(v); }, function (e) { clearTimeout(timer); reject(e); });
+    });
   }
   // Apps Script is sometimes slow to wake up or answers once with an error page, so every call gets a second try.
   function twice(fn) {
@@ -115,9 +118,8 @@
     if (!C.backendUrl) return Promise.reject(new Error("No backend URL"));
     var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); }).join("&");
     return twice(function () {
-      var to = withTimeout(15000);
-      return fetch(C.backendUrl + "?" + qs, { method: "GET", signal: to.signal })
-        .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+      return withTimeout(fetch(C.backendUrl + "?" + qs, { method: "GET" })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }), 15000);
     });
   }
   function apiPost(body) {
@@ -125,10 +127,9 @@
     // text/plain avoids a CORS preflight, which Apps Script does not answer.
     // Sending twice is safe: the backend saves each attempt ID only once.
     return twice(function () {
-      var to = withTimeout(30000);
-      return fetch(C.backendUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body), signal: to.signal })
-        .then(function (r) { to.done(); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (res) { if (!res || !res.ok) throw new Error((res && res.error) || "Save failed"); return res; });
+      return withTimeout(fetch(C.backendUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (res) { if (!res || !res.ok) throw new Error((res && res.error) || "Save failed"); return res; }), 30000);
     });
   }
 
